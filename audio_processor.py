@@ -3,7 +3,6 @@ import io
 import librosa
 import numpy as np
 import soundfile as sf
-from pydub import AudioSegment
 from config import config
 
 class AudioProcessor:
@@ -26,23 +25,26 @@ class AudioProcessor:
             # Decode base64 to bytes
             audio_bytes = base64.b64decode(base64_string)
             
-            # Load audio using pydub (handles MP3)
-            audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes), format="mp3")
+            # Create a BytesIO object from the audio bytes
+            audio_io = io.BytesIO(audio_bytes)
             
-            # Convert to numpy array
-            samples = np.array(audio_segment.get_array_of_samples())
+            # Use soundfile to load the audio
+            # This works with most formats without needing ffmpeg
+            try:
+                samples, original_sr = sf.read(audio_io)
+            except:
+                # If soundfile fails, try with librosa (which has fallbacks)
+                audio_io.seek(0)
+                samples, original_sr = librosa.load(audio_io, sr=None, mono=False)
             
-            # Convert to float32 and normalize
-            if audio_segment.sample_width == 2:  # 16-bit audio
-                samples = samples.astype(np.float32) / 32768.0
-            elif audio_segment.sample_width == 4:  # 32-bit audio
-                samples = samples.astype(np.float32) / 2147483648.0
-                
-            # Handle stereo by averaging channels
-            if audio_segment.channels == 2:
-                samples = samples.reshape((-1, 2)).mean(axis=1)
+            # Convert to mono if stereo
+            if len(samples.shape) > 1 and samples.shape[1] == 2:
+                samples = samples.mean(axis=1)
+            elif len(samples.shape) > 1:
+                samples = samples.T.mean(axis=0)
             
-            original_sr = audio_segment.frame_rate
+            # Ensure float32
+            samples = samples.astype(np.float32)
             
             # Resample to target sample rate if needed
             if original_sr != self.sample_rate:
